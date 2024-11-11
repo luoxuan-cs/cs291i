@@ -22,7 +22,7 @@ class Agent:
         match = pattern.search(cleaned_text)
         return match.group(1) if match else None
 
-    def gpt(self, prompt, max_tokens, temp, model):
+    def gpt(self, prompt, max_tokens, temp, model, verbose=False):
         tools = [
             {
                 "type": "function",
@@ -68,7 +68,8 @@ class Agent:
             tool_choice="auto"
         )
 
-        print(response.choices[0].message)
+        if verbose:
+            print(response.choices[0].message)
 
         for tool_call in response.choices[0].message.tool_calls:
             args = json.loads(tool_call.function.arguments)
