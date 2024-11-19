@@ -2,6 +2,8 @@ import streamlit as st
 import json
 import os
 from datetime import datetime, date
+from agent import Agent
+from PIL import Image
 
 # Data file path
 DATA_FILE = 'schedule_data.json'
@@ -27,16 +29,18 @@ def select_date():
     selected_date_str = selected_date.strftime('%m/%d/%Y')
     return selected_date_str
 
-# Display schedule function
 def display_schedule(schedule_data, selected_date_str):
     st.header(f"Schedule for {selected_date_str}")
-    # Add button next to schedule title
-    if st.button("Add Activity"):
-        st.session_state['adding_activity'] = True
-
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Add Activity Manually"):
+            st.session_state['adding_activity'] = True
+    with col2:
+        if st.button("Add Activity with AI Assistant"):
+            st.session_state['using_ai_assistant'] = True
+    
     activities = schedule_data.get(selected_date_str, [])
     if activities:
-        # Sort activities by start time
         activities.sort(key=lambda x: x['start_time'])
         for idx, activity in enumerate(activities):
             with st.expander(f"{activity['start_time']} - {activity['end_time']}: {activity['title']}", expanded=False):
@@ -46,7 +50,6 @@ def display_schedule(schedule_data, selected_date_str):
                 if col1.button("Modify", key=f"modify_{selected_date_str}_{idx}"):
                     st.session_state['modifying_activity_index'] = idx
                 if col2.button("Delete", key=f"delete_{selected_date_str}_{idx}"):
-                    # Delete the activity
                     activities.pop(idx)
                     schedule_data[selected_date_str] = activities
                     save_data(schedule_data)
@@ -54,67 +57,6 @@ def display_schedule(schedule_data, selected_date_str):
                     st.rerun()
     else:
         st.info("No activities scheduled for this date.")
-
-# system functions
-# =====================================================================================
-def sys_new_activity(date_str, start_time, end_time, title, description, priority):
-    """
-    System function to add a new activity and refresh schedule.
-
-    Parameters:
-    - date_str (str): Date in 'mm/dd/yyyy' format.
-    - start_time (str): Start time in 'HH:MM' 24-hour format.
-    - end_time (str): End time in 'HH:MM' 24-hour format.
-    - title (str): Title of the activity.
-    - description (str): Description of the activity.
-    - priority (int): Priority of the activity (0-5).
-
-    """
-    # Load current schedule data
-    schedule_data = load_data()
-    
-    # Check if the date is valid
-    try:
-        datetime.strptime(date_str, '%m/%d/%Y')
-    except ValueError:
-        print("Invalid date format. Please use 'mm/dd/yyyy'.")
-        return
-
-    # Ensure start and end times are in valid format and logic
-    try:
-        if datetime.strptime(start_time, '%H:%M') >= datetime.strptime(end_time, '%H:%M'):
-            print("Start time must be earlier than end time.")
-            return
-    except ValueError:
-        print("Invalid time format. Please use 'HH:MM'.")
-        return
-
-    # Check if title is non-empty
-    if not title.strip():
-        print("Title cannot be empty.")
-        return
-
-    # Create new activity
-    new_activity = {
-        'start_time': start_time,
-        'end_time': end_time,
-        'title': title,
-        'description': description,
-        'priority': priority
-    }
-
-    # Add and sort activities
-    activities = schedule_data.get(date_str, [])
-    activities.append(new_activity)
-    activities.sort(key=lambda x: x['start_time'])
-    schedule_data[date_str] = activities
-    
-    # Save updated schedule
-    save_data(schedule_data)
-    print("Activity added successfully.")
-# =====================================================================================
-
-
 
 # Add new activity function (UI)
 def submit_activity(schedule_data, selected_date_str):
@@ -235,31 +177,91 @@ def modify_activity(schedule_data, selected_date_str):
             st.session_state['modifying_activity_index'] = None
             st.rerun()
 
-# Main function
+# Add new activity with AI Assistant
+def ai_assistant_add_activity(agent, schedule_data, selected_date_str):
+    st.subheader("AI Schedule Assistant")
+    
+    # Text input for natural language command
+    text_prompt = st.text_area("Describe the activity you want to add", 
+                              placeholder="e.g., 'Schedule a team meeting tomorrow from 2pm to 3pm with high priority'")
+    
+    # Image upload
+    image_file = st.file_uploader("Upload an image (optional)", type=['png', 'jpg', 'jpeg'])
+    image_input = None
+    if image_file is not None:
+        image_input = Image.open(image_file)
+        st.image(image_input, caption="Uploaded Image")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Submit to AI"):
+            if text_prompt:
+                with st.spinner("AI is processing your request..."):
+                    # Get current schedule for context
+                    current_schedule = schedule_data.get(selected_date_str, [])
+                    
+                    # Call the AI agent
+                    response, explanation = agent.query(current_schedule, text_prompt, image_input)
+                    
+                    # Display AI response and explanation
+                    st.success("Activity added successfully!")
+                    
+                    st.write("**AI Response:**")
+                    st.write(response)
+                    
+                    st.write("**AI Explanation:**")
+                    st.write(explanation)
+                    
+                    # Only reset the state, don't rerun immediately
+                    st.session_state['using_ai_assistant'] = False
+            else:
+                st.error("Please provide a description of the activity.")
+
+    with col2:
+        if st.button("Cancel"):
+            st.session_state['using_ai_assistant'] = False
+            st.rerun()
+
 def main():
     # Initialize session state variables
     if 'adding_activity' not in st.session_state:
         st.session_state['adding_activity'] = False
     if 'modifying_activity_index' not in st.session_state:
         st.session_state['modifying_activity_index'] = None
+    if 'using_ai_assistant' not in st.session_state:
+        st.session_state['using_ai_assistant'] = False
+
+    # Initialize OpenAI client and Agent
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key='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')
+        agent = Agent(client)
+    except Exception as e:
+        st.error(f"Error initializing AI agent: {str(e)}")
+        agent = None
 
     # Load schedule data
     schedule_data = load_data()
+    
     # Application title
-    st.title("Schedule Application")
+    st.title("AI-Powered Schedule Application")
+    
     # Date selection
     selected_date_str = select_date()
+    
     # Display schedule
     display_schedule(schedule_data, selected_date_str)
 
-    # If adding_activity is True, show the add activity form
+    # Show appropriate form based on state
     if st.session_state['adding_activity']:
-        print("submit new activity:")
         submit_activity(schedule_data, selected_date_str)
-    # If modifying_activity_index is not None, show the modify activity form
     elif st.session_state['modifying_activity_index'] is not None:
-        print("modify activity:")
         modify_activity(schedule_data, selected_date_str)
+    elif st.session_state['using_ai_assistant']:
+        if agent:
+            ai_assistant_add_activity(agent, schedule_data, selected_date_str)
+        else:
+            st.error("AI Assistant is not available. Please check your OpenAI configuration.")
 
 if __name__ == "__main__":
     main()
