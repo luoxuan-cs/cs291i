@@ -124,57 +124,57 @@ class Agent:
         return response
 
     def gpt(self, prompt, max_tokens, temp, model, verbose=False):
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "sys_new_activity",
-                    "description": "System function to add a new activity and refresh schedule",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "date_str": {
-                                "type": "string",
-                                "description": "Date in 'mm/dd/yyyy' format",
-                            },
-                            "start_time": {
-                                "type": "string", 
-                                "description": "Start time in 'HH:MM' 24-hour format"},
-                            "end_time": {
-                                "type": "string", 
-                                "description": "End time in 'HH:MM' 24-hour format"},
-                            "title": {
-                                "type": "string", 
-                                "description": "Title of the activity"},
-                            "Description": {
-                                "type": "string", 
-                                "description": "Description of the activity"},
-                            "priority": {
-                                "type": "string", 
-                                "enum": ["0", "1", "2", "3", "4", "5"],
-                                "description": "Priority of the activity (0-5), 5 is highest"},
-                        },
-                        "required": ["date_str", "start_time", "end_time", "title", "Description", "priority"],
-                    },
-                },   
-            }
-        ]
+        # tools = [
+        #     {
+        #         "type": "function",
+        #         "function": {
+        #             "name": "sys_new_activity",
+        #             "description": "System function to add a new activity and refresh schedule",
+        #             "parameters": {
+        #                 "type": "object",
+        #                 "properties": {
+        #                     "date_str": {
+        #                         "type": "string",
+        #                         "description": "Date in 'mm/dd/yyyy' format",
+        #                     },
+        #                     "start_time": {
+        #                         "type": "string", 
+        #                         "description": "Start time in 'HH:MM' 24-hour format"},
+        #                     "end_time": {
+        #                         "type": "string", 
+        #                         "description": "End time in 'HH:MM' 24-hour format"},
+        #                     "title": {
+        #                         "type": "string", 
+        #                         "description": "Title of the activity"},
+        #                     "Description": {
+        #                         "type": "string", 
+        #                         "description": "Description of the activity"},
+        #                     "priority": {
+        #                         "type": "string", 
+        #                         "enum": ["0", "1", "2", "3", "4", "5"],
+        #                         "description": "Priority of the activity (0-5), 5 is highest"},
+        #                 },
+        #                 "required": ["date_str", "start_time", "end_time", "title", "Description", "priority"],
+        #             },
+        #         },   
+        #     }
+        # ]
 
         response = self.openai_client.chat.completions.create(
             model=model,
             messages=prompt,
             temperature=temp,
             max_tokens=max_tokens,
-            tools=tools,
-            tool_choice="auto"
+            # tools=tools,
+            # tool_choice="auto"
         )
 
         if verbose:
             print(response.choices[0].message)
 
-        for tool_call in response.choices[0].message.tool_calls:
-            args = json.loads(tool_call.function.arguments)
-            sys_new_activity(args['date_str'], args['start_time'], args['end_time'], args['title'], args['Description'], int(args['priority']))
+        # for tool_call in response.choices[0].message.tool_calls:
+        #     args = json.loads(tool_call.function.arguments)
+        #     sys_new_activity(args['date_str'], args['start_time'], args['end_time'], args['title'], args['Description'], int(args['priority']))
 
         response = response.choices[0].message.content
         prompt_tokens = self.num_tokens(str(prompt), "cl100k_base")
@@ -212,6 +212,12 @@ class Agent:
         return image_prompt
 
     def query(self, history, text_input, image_input):
+        # Find the data to change
+        # Return the json data of that data
+        # Read the json data and make changes
+        # Apply changes to original json
+
+
         # history is a json file describing the current calender
         # text_input is user's text input for scheduling
         # image_input is user's image input for scheduling
@@ -224,38 +230,73 @@ class Agent:
         current_date = datetime.now().date() 
 
         # Refine the prompt so that agent would only make function call.
-        rag_prompt = [
-            {"role": "system", "content": "You are a helpful assistant to analyze user's intention and call functions based on the current schdule."},
-            {"role": "user", "content": f"Add the event using function call based on user's query: {text_input}. Today is {current_date}"},
+        # rag_prompt = [
+        #     {"role": "system", "content": "You are a helpful assistant to analyze user's intention and call functions based on the current schdule."},
+        #     {"role": "user", "content": f"Add the event using function call based on user's query: {text_input}. Today is {current_date}"},
+        # ]
+
+        rag_prompt_data = [
+            {"role": "system", "content": "You are a helpful assistant to analyze user's intention and decide which data's schdule need to change."},
+            {"role": "user", "content": f"What data's schdule need to change based on user's query: {text_input}. Today is {current_date}. The return format should be 'MM/DD/YYYY', if multiple data need to change, separate the data by ';' , ONLY RETURN THE DATA."},
         ]
 
+        # history is necessary
         if history:
-            rag_prompt.append({"role": "user", "content": f"The current schdule is {history}"})
+            rag_prompt_data.append({"role": "user", "content": f"The current schdule is {history}"})
         
 
         if image_input:
             image_prompt = self.convert_image_to_base64(image_input)
-            rag_prompt.append({"role": "user", "content": image_prompt})
+            rag_prompt_data.append({"role": "user", "content": image_prompt})
 
-        response = self.gpt(rag_prompt, 256, 0.3, 'gpt-4o-mini')
+        response = self.gpt(rag_prompt_data, 256, 0.3, 'gpt-4o-mini')
+
+        filter_dates = response.split(";")
+        filtered_data = {date: activities for date, activities in history.items() if date in filter_dates}
+        # print(filtered_data)
+
+        rag_prompt_change = [
+            {"role": "system", "content": "You are a helpful assistant to analyze user's intention and change the schdule. You need to return the schdule as a json format which is the same as the schdule I give you"},
+            {"role": "user", "content": f"Change the schdule based on user's query: {text_input}. The schdule need to be changed are {filtered_data}.The return result should ONLY be a json object that has the same format as this one without addtional content."},
+        ]
+
+        # response_change = self.gpt(rag_prompt_change, 1024, 0.3, 'gpt-4o-mini')
+        max_retries = 3
+        retries = 0
+        while retries < max_retries:
+            response_change = self.gpt(rag_prompt_change, 1024, 0.3, 'gpt-4o-mini')
+            try:
+                changed_data = json.loads(response_change)
+                print("Valid JSON received.")
+                print(changed_data)
+                break
+            except json.JSONDecodeError as e:
+                changed_data = filtered_data
+                print(f"Error parsing JSON (attempt {retries + 1}): {e}")
+                print(response_change)
+                retries += 1
+
+        for date, activities in changed_data.items():
+            history[date] = activities
 
         if image_input:
             cot_prompt = [
                 {"role": "system", "content": "Please explain why you perform this action based on user's query."},
                 {"role": "user", "content": f"User's query: {text_input}. Today is {current_date}."},
                 {"role": "user", "content": image_prompt},
-                {"role": "user", "content": f"Your response: {response}, please explain it."}
+                {"role": "user", "content": f"The schdule need to be changed are {filtered_data}. Your changed schdule: {response_change}, please explain it."}
             ]
         else:
             cot_prompt = [
                 {"role": "system", "content": "Please explain why you schedule the activity here based on user's query."},
                 {"role": "user", "content": f"User's query: {text_input}. Today is {current_date}."},
-                {"role": "user", "content": f"Your response: {response}, please explain it."}
+                {"role": "user", "content": f"The schdule need to be changed are {filtered_data}. Your changed schdule: {response_change}, please explain it."}
             ]
 
         cot_response = self.cot(cot_prompt, 512, 0.3, 'gpt-4o-mini')
 
-        return response, cot_response
+        return response, cot_response, history
+        # return response, history
 
         
 """

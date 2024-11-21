@@ -199,9 +199,13 @@ def ai_assistant_add_activity(agent, schedule_data, selected_date_str):
                 with st.spinner("AI is processing your request..."):
                     # Get current schedule for context
                     current_schedule = schedule_data.get(selected_date_str, [])
+
+                    current_schedule = schedule_data
                     
                     # Call the AI agent
-                    response, explanation = agent.query(current_schedule, text_prompt, image_input)
+                    response, explanation, changed_schdule = agent.query(current_schedule, text_prompt, image_input)
+
+                    save_data(changed_schdule)
                     
                     # Display AI response and explanation
                     st.success("Activity added successfully!")
